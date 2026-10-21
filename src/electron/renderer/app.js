@@ -9167,7 +9167,13 @@ function indexStaleDiagnostic() {
   if (!clients || typeof clients !== 'object') return null;
   for (const [clientId, entry] of Object.entries(clients)) {
     const diagnostic = (entry?.diagnostics || []).find((item) => item?.code === 'index-stale');
-    if (diagnostic) return { clientId, lagMs: Number(diagnostic.lagMs) || 0 };
+    if (diagnostic) {
+      return {
+        clientId,
+        lagMs: Number(diagnostic.lagMs) || 0,
+        unreadBytes: Number(diagnostic.unreadBytes) || 0
+      };
+    }
   }
   return null;
 }
@@ -9191,9 +9197,17 @@ function renderIndexStaleBanner() {
   const lag = formatIndexLag(stale.lagMs);
   // The client id is interpolated rather than looked up: it is the tool's own
   // name in every locale, and a missing catalogue entry would render the key.
-  text.textContent = lag
+  const headline = lag
     ? t('home.indexStale.withLag', { client: stale.clientId, lag })
     : t('home.indexStale.noLag', { client: stale.clientId });
+  // Stating the backlog next to the lag is what separates "one old transcript"
+  // from "a day of work is missing": the age alone reads as catastrophic when a
+  // single stale file owns it, and as mild when a large one is the cause.
+  const backlogMb = Math.round(stale.unreadBytes / (1024 * 1024));
+  const backlog = backlogMb > 0
+    ? t('home.indexStale.withBacklog', { megabytes: backlogMb })
+    : '';
+  text.textContent = backlog ? `${headline} ${backlog}` : headline;
 }
 
 function renderSessionUsageArchiveStatus() {

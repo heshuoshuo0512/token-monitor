@@ -417,6 +417,22 @@ const { emptyPeriod } = require('../../src/shared/usage');
   assert.equal(wide.stalledSessions, 2);
   assert.equal(wide.stale, true);
 
+  // The headline age is the freshest cursor's, not the oldest file's: an
+  // abandoned transcript from days ago must not date an index whose newest
+  // import is minutes old. Here the two stalled files were imported 21 minutes
+  // and 0 minutes before `nowMs`, so the index as a whole is current even
+  // though one file has gone three days without an import.
+  const ancient = path.join(root, 'ancient.jsonl');
+  fs.writeFileSync(ancient, 'x'.repeat(2048));
+  fs.utimesSync(ancient, nowMs / 1000, nowMs / 1000);
+  database.prepare('INSERT INTO file_offsets VALUES (?, ?, ?, NULL)')
+    .run(ancient, 0, nowMs - 3 * 24 * 60 * 60 * 1000);
+  const mixed = detectOmpIndexLag(database, { nowMs });
+  assert.equal(mixed.stalledSessions, 3);
+  assert.equal(mixed.lagMs, 0, `headline should follow the newest cursor, got ${mixed.lagMs}`);
+  assert.ok(mixed.oldestLagMs >= 3 * 24 * 60 * 60 * 1000 - 1000, `oldest ${mixed.oldestLagMs}`);
+  assert.ok(mixed.maxFileLagMs >= 3 * 24 * 60 * 60 * 1000 - 1000, `maxFile ${mixed.maxFileLagMs}`);
+
   // A second spelling of one transcript: OMP's session tree is reachable
   // through a symlinked profile directory, so two cursor rows can name the same
   // inode. The furthest offset wins, and a superseded row at offset 0 cannot

@@ -402,10 +402,19 @@ function evaluateIndexLag(candidates, options = {}) {
   const thresholdMs = positiveInteger(options.thresholdMs, OMP_INDEX_LAG_THRESHOLD_MS);
   const graceMs = positiveInteger(options.backlogGraceMs, OMP_INDEX_LAG_BACKLOG_GRACE_MS);
   const backlogBytes = positiveInteger(options.backlogBytes, OMP_INDEX_LAG_BACKLOG_BYTES);
-  let lagMs = 0;
+  // The headline has to answer "how stale is the freshest thing here?", which is
+  // the age of the newest cursor among the files still waiting. A per-file
+  // `mtimeMs - cursorMs` answers a different question — how long *that* file has
+  // gone ignored — and one abandoned transcript from a week ago then outranks a
+  // day of real backlog. Both are reported because they fail differently: the
+  // newest cursor dates the whole index, the per-file maximum says whether some
+  // single transcript is wedged.
+  let newestCursorMs = 0;
+  let oldestCursorMs = 0;
   let stalledSessions = 0;
   let unreadBytes = 0;
   let maxUnreadBytes = 0;
+  let maxFileLagMs = 0;
   let backlogStale = false;
   for (const file of candidates) {
     // Only a transcript still being written can make the index stale. Once this
@@ -418,13 +427,20 @@ function evaluateIndexLag(candidates, options = {}) {
     // Negative when a file was rewritten shorter than its cursor; that is a
     // separate oddity, not a lag.
     const lag = Math.max(0, file.mtimeMs - file.cursorMs);
-    lagMs = Math.max(lagMs, lag);
+    maxFileLagMs = Math.max(maxFileLagMs, lag);
+    if (!newestCursorMs || file.cursorMs > newestCursorMs) newestCursorMs = file.cursorMs;
+    if (!oldestCursorMs || file.cursorMs < oldestCursorMs) oldestCursorMs = file.cursorMs;
     if (unread >= backlogBytes && lag >= graceMs) backlogStale = true;
   }
+  const lagMs = stalledSessions > 0 ? Math.max(0, nowMs - newestCursorMs) : 0;
   return {
     active: stalledSessions > 0,
     lagMs,
-    stale: stalledSessions > 0 && (lagMs >= thresholdMs || backlogStale),
+    // Kept so a caller can tell "the index is three hours behind" from "one old
+    // transcript has not moved in 141 hours"; the banner headlines `lagMs`.
+    oldestLagMs: stalledSessions > 0 ? Math.max(0, nowMs - oldestCursorMs) : 0,
+    maxFileLagMs,
+    stale: stalledSessions > 0 && (maxFileLagMs >= thresholdMs || backlogStale),
     stalledSessions,
     unreadBytes,
     maxUnreadBytes
