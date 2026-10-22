@@ -819,6 +819,19 @@ function collectorIntervalMs() {
 function collectorWatchEnabled() {
   return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
 }
+function requestOmpStatsRefreshOnAppOpen() {
+  if (process.platform !== 'linux') return;
+  const launcher = path.join(os.homedir(), '.local', 'bin', 'omp-stats-live');
+  try {
+    fs.accessSync(launcher, fs.constants.X_OK);
+    const { spawn } = require('node:child_process');
+    const child = spawn(launcher, ['--refresh'], { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch (_) {
+    // The optional user service may not be installed; the normal read-only
+    // collector and stale-index diagnostic remain available in that case.
+  }
+}
 
 function collectorWatchTriggersCollection() {
   return normalizeCollectionMode(settings?.collectionMode) === 'live';
@@ -7707,6 +7720,7 @@ function rebuildWindow() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
+  requestOmpStatsRefreshOnAppOpen();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
   // Switching the OS between light and dark repaints the taskbar underneath an
